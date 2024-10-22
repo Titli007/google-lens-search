@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import requests
 import os
 from dotenv import load_dotenv
+from fastapi.responses import RedirectResponse
 
 # Load environment variables from .env file
 load_dotenv()
@@ -10,8 +11,10 @@ load_dotenv()
 # Initialize FastAPI app
 app = FastAPI()
 
-# Fetch SerpAPI key from the environment
+# Fetch from the environment
 SERP_API_KEY = os.getenv('SERP_API_KEY')
+HOST = os.getenv('HOST', '127.0.0.1')
+PORT = int(os.getenv('PORT', 8000)) 
 
 # Pydantic model for the input data
 class InstagramRequest(BaseModel):
@@ -76,7 +79,12 @@ async def process_instagram_url(request: InstagramRequest):
         "google_lens_result": google_lens_result
     }
 
+@app.get("/")
+async def redirect_to_docs():
+    return RedirectResponse(url="/docs")  # Redirect to the FastAPI docs
+
+
 # Run the app
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=HOST, port=PORT)
