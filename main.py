@@ -47,6 +47,21 @@ def sendRequestWithoutlogin(shortcode: str) -> str:
     except KeyError:
         raise HTTPException(status_code=500, detail="Invalid response structure from Instagram")
 
+# Function to filter visual matches based on price and stock availability
+def filter_visual_matches(visual_matches):
+    filtered_matches = []
+    
+    for match in visual_matches:
+        # Check if both price object exists and in_stock is true
+        if (
+            'price' in match and 
+            'in_stock' in match and 
+            match['in_stock'] is True
+        ):
+            filtered_matches.append(match)
+    
+    return filtered_matches
+
 # Async function to perform a Google Lens search using SerpAPI
 async def google_lens_search(image_url: str):
     endpoint = "https://serpapi.com/search"
@@ -61,7 +76,13 @@ async def google_lens_search(image_url: str):
     if response.status_code != 200:
         raise HTTPException(status_code=response.status_code, detail="Error retrieving data from Google Lens API")
     
-    return response.json()
+    result = response.json()
+    
+    # Filter the visual matches if they exist
+    if 'visual_matches' in result:
+        result['visual_matches'] = filter_visual_matches(result['visual_matches'])
+    
+    return result
 
 # API route for processing the Instagram URL and performing the search
 @app.post("/process_instagram_url")
@@ -72,7 +93,7 @@ async def process_instagram_url(request: InstagramRequest):
     # Step 2: Get the image URL from Instagram's GraphQL API
     image_url = sendRequestWithoutlogin(post_id)
     
-    # Step 3: Perform a Google Lens search on the image
+    # Step 3: Perform a Google Lens search on the image and get filtered results
     google_lens_result = await google_lens_search(image_url)
     
     return {
@@ -83,9 +104,7 @@ async def process_instagram_url(request: InstagramRequest):
 async def redirect_to_docs():
     return RedirectResponse(url="/docs")  # Redirect to the FastAPI docs
 
-
 # Run the app
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app)
-
