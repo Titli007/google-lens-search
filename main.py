@@ -1,9 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Depends
 from pydantic import BaseModel
 import requests
 import os
 from dotenv import load_dotenv
 from fastapi.responses import RedirectResponse
+import pycountry
 
 # Load environment variables from .env file
 load_dotenv()
@@ -15,10 +16,32 @@ app = FastAPI()
 SERP_API_KEY = os.getenv('SERP_API_KEY')
 HOST = os.getenv('HOST', '127.0.0.1')
 PORT = int(os.getenv('PORT', 8000)) 
+AUTH_TOKEN = os.getenv('AUTH_TOKEN')  # The auth token from .env
 
 # Pydantic model for the input data
 class InstagramRequest(BaseModel):
     url: str
+    country: str = "India"  # Default country set to India
+
+# Dependency to check the auth token in headers
+def verify_auth_token(request: Request):
+    auth_header = request.headers.get("Authorization")
+    
+    if auth_header is None or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization header missing or invalid")
+    
+    token = auth_header.split(" ")[1]
+    
+    if token != AUTH_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid auth token")
+
+# Function to extract ISO country code
+def get_country_iso_code(country_name: str) -> str:
+    country = pycountry.countries.get(name=country_name)
+    if country:
+        return country.alpha_2
+    else:
+        raise HTTPException(status_code=400, detail="Invalid country name provided")
 
 # Function to extract the Instagram post ID from the URL
 def extract_instagram_id(url: str) -> str:
@@ -29,7 +52,7 @@ def extract_instagram_id(url: str) -> str:
         raise HTTPException(status_code=400, detail="Invalid Instagram URL format")
 
 # Function to send a request to Instagram's GraphQL API to get the image
-def sendRequestWithoutlogin(shortcode: str) -> str:
+def image_downloader(shortcode: str) -> str:
     instagram_url = "https://www.instagram.com/graphql/query"
     data = f"variables=%7B%22shortcode%22%3A%22{shortcode}%22%2C%22fetch_tagged_user_count%22%3Anull%2C%22hoisted_comment_id%22%3Anull%2C%22hoisted_reply_id%22%3Anull%7D&doc_id=8845758582119845"
     headers = {
@@ -63,11 +86,12 @@ def filter_visual_matches(visual_matches):
     return filtered_matches
 
 # Async function to perform a Google Lens search using SerpAPI
-async def google_lens_search(image_url: str):
+async def google_lens_search(image_url: str, country_iso: str):
     endpoint = "https://serpapi.com/search"
     params = {
         "engine": "google_lens",
         "url": image_url,
+        "country": country_iso,  # Send country ISO code
         "api_key": SERP_API_KEY
     }
 
@@ -86,15 +110,18 @@ async def google_lens_search(image_url: str):
 
 # API route for processing the Instagram URL and performing the search
 @app.post("/process_instagram_url")
-async def process_instagram_url(request: InstagramRequest):
+async def process_instagram_url(request: InstagramRequest, token: str = Depends(verify_auth_token)):
     # Step 1: Extract the Instagram post ID from the URL
     post_id = extract_instagram_id(request.url)
     
     # Step 2: Get the image URL from Instagram's GraphQL API
-    image_url = sendRequestWithoutlogin(post_id)
+    image_url = image_downloader(post_id)
     
-    # Step 3: Perform a Google Lens search on the image and get filtered results
-    google_lens_result = await google_lens_search(image_url)
+    # Step 3: Convert country to ISO code (default is India)
+    country_iso = get_country_iso_code(request.country)
+    
+    # Step 4: Perform a Google Lens search on the image and get filtered results
+    google_lens_result = await google_lens_search(image_url, country_iso)
     
     return {
         "google_lens_result": google_lens_result
